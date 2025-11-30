@@ -1,0 +1,19 @@
+version: '3'
+services:
+  postgres-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: amine
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: userdb
+    ports:
+      - "5432:5432"
+
+  user-service:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgres://amine:secret@postgres-db:5432/userdb?sslmode=disable
+    depends_on:
+      - postgres-db
