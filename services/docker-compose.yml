@@ -1,5 +1,29 @@
 version: '3.8'
+
+
 services:
+
+  kong:
+    image: kong:latest
+    container_name: kong-gateway
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    
+
+    volumes:
+      - ../kong-config:/usr/local/kong/declarative
+    depends_on:
+      - user_service
+      - product_service
+
 
   user_db:
     image: postgres:17
@@ -7,8 +31,6 @@ services:
       POSTGRES_USER: amine
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: userdb
-    ports:
-      - "5432:5432"
     volumes:
       - user_data:/var/lib/postgresql/data
       - ./init-scripts/init-user-db.sh:/docker-entrypoint-initdb.d/init-user-db.sh
@@ -20,8 +42,6 @@ services:
       POSTGRES_USER: product
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: productdb
-    ports:
-      - "5433:5432"
     volumes:
       - product_data:/var/lib/postgresql/data
       - ./init-scripts/init-product-db.sh:/docker-entrypoint-initdb.d/init-product-db.sh
@@ -29,8 +49,6 @@ services:
   # user_service
   user_service:
     build: ./user_service
-    ports:
-      - "8080:8080"
     environment:
       - DATABASE_URL=postgres://amine:secret@user_db:5432/userdb?sslmode=disable
     depends_on:
@@ -39,8 +57,6 @@ services:
   # product_service
   product_service:
     build: ./product_service
-    ports:
-      - "8081:8080"
     environment:
       - DATABASE_URL=postgres://product:secret@product_db:5432/productdb?sslmode=disable
     depends_on:
