@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  order-service:
+    build: .
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_HOST=order-db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_NAME=orderdb
+    depends_on:
+      - order-db
+    networks:
+      - microservices-network
+
+  order-db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=orderdb
+    volumes:
+      - order-db-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5434:5432"
+    networks:
+      - microservices-network
+
+volumes:
+  order-db-data:
+
+networks:
+  microservices-network:
+    driver: bridge

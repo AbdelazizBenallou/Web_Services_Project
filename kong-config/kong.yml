@@ -1,18 +1,45 @@
-_format_version: "3.0"
-
+_format_version: "1.1"
 
 services:
-
   - name: user-service
-    url: http://user_service:8080
+    host: user-upstream  # ← اسم الـ upstream
+    port: 80
+    protocol: http
     routes:
       - name: user-routes
         paths: ["/api/v1/users"]
         strip_path: false
 
   - name: product-service
-    url: http://product_service:8080
+    host: product-upstream
+    port: 80
+    protocol: http
     routes:
       - name: product-routes
         paths: ["/api/v1/products"]
         strip_path: false
+
+  - name: order-service
+    host: order-upstream
+    port: 80
+    protocol: http
+    routes:
+      - name: order-routes
+        paths: ["/api/v1/orders"]
+        strip_path: false
+
+upstreams:
+  - name: user-upstream
+    targets:
+      - target: user_service:8080
+        weight: 100
+
+  - name: product-upstream
+    targets:
+      - target: product_service:8080
+        weight: 100
+
+  - name: order-upstream
+    targets:
+      - target: order_service:8082
+        weight: 100
