@@ -1,0 +1,138 @@
+version: "3.8"
+
+services:
+  # =========================
+  # RabbitMQ (SHARED)
+  # =========================
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # =========================
+  # USER SERVICE DATABASE
+  # =========================
+  user_postgres:
+    image: postgres:17
+    container_name: user_service_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: user_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - user_postgres_data:/var/lib/postgresql/data
+      - ./services/user_service/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # =========================
+  # ORDER SERVICE DATABASE
+  # =========================
+  order_postgres:
+    image: postgres:17
+    container_name: order_service_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: order_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5433:5432"
+    volumes:
+      - order_postgres_data:/var/lib/postgresql/data
+      - ./services/order_service/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # =========================
+  # USER SERVICE API
+  # =========================
+  user_service:
+    build: ./services/user_service
+    container_name: user_service_web
+    restart: unless-stopped
+    depends_on:
+      user_postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: user_postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: password123
+      DB_NAME: user_service
+      DB_SSLMODE: disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./services/user_service:/app
+    networks:
+      - backend
+
+  # =========================
+  # ORDER SERVICE API
+  # =========================
+  order_service:
+    build: ./services/order_service
+    container_name: order_service_web
+    restart: unless-stopped
+    depends_on:
+      order_postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: order_postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: password123
+      DB_NAME: order_service
+      DB_SSLMODE: disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./services/order_service:/app
+    networks:
+      - backend
+
+# =========================
+# VOLUMES
+# =========================
+volumes:
+  user_postgres_data:
+  order_postgres_data:
+
+# =========================
+# NETWORK
+# =========================
+networks:
+  backend:
+    driver: bridge
+

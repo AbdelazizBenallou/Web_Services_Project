@@ -1,0 +1,908 @@
+The following is a digest of the repository "black_project".
+This digest is designed to be easily parsed by Large Language Models.
+
+--- SUMMARY ---
+Repository: black_project
+Files Analyzed: 8
+Total Text Size: 18.75 KB
+Estimated Tokens (text only): ~5,357
+
+--- DIRECTORY STRUCTURE ---
+black_project/
+├── config/
+│   └── db.go
+├── delivery/
+│   └── http/
+│       ├── user_handler.go
+│       └── user_routes.go
+├── domain/
+│   └── user.go
+├── repository/
+│   ├── postgres.go
+│   └── user_repository.go
+├── usecase/
+│   └── user_usecase.go
+└── main.go
+
+
+--- FILE CONTENTS ---
+============================================================
+FILE: config/db.go
+============================================================
+package config
+
+import (
+    "database/sql"
+    "fmt"
+    "os"
+    
+    _ "github.com/lib/pq"
+)
+
+func ConnectDB() (*sql.DB, error) {
+    connStr := fmt.Sprintf(
+        "host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+        os.Getenv("DB_HOST"),
+        os.Getenv("DB_PORT"),
+        os.Getenv("DB_USER"),
+        os.Getenv("DB_PASSWORD"),
+        os.Getenv("DB_NAME"),
+        os.Getenv("DB_SSLMODE"),
+    )
+    
+    db, err := sql.Open("postgres", connStr)
+    if err != nil {
+        return nil, err
+    }
+    
+    return db, nil
+}
+
+
+============================================================
+FILE: delivery/http/user_handler.go
+============================================================
+package handler
+
+import (
+	"black_project/domain"
+	"black_project/usecase"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
+)
+
+type UserHandler struct {
+	userUC usecase.UserUseCase
+}
+
+func NewUserHandler(userUC usecase.UserUseCase) *UserHandler {
+	return &UserHandler{userUC: userUC}
+}
+
+type RegisterRequest struct {
+	Email    string          `json:"email"`
+	Password string          `json:"password"`
+	FullName string          `json:"full_name"`
+	Role     domain.Role     `json:"role"`
+	Profile  domain.Profile  `json:"profile"`
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type UserResponse struct {
+	ID        int64           `json:"id"`
+	FullName  string          `json:"full_name"`
+	Email     string          `json:"email"`
+	Role      domain.Role     `json:"role"`
+	Profile   domain.Profile  `json:"profile"`
+	CreatedAt string          `json:"created_at"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+type SuccessResponse struct {
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	user, err := h.userUC.Register(
+		req.Email,
+		req.Password,
+		req.FullName,
+		req.Role,
+		req.Profile,
+	)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response := UserResponse{
+		ID:        user.ID,
+		FullName:  user.FullName,
+		Email:     user.Email,
+		Role:      user.Role,
+		Profile:   user.Profile,
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+	}
+
+	respondWithJSON(w, http.StatusCreated, SuccessResponse{
+		Message: "User registered successfully",
+		Data:    response,
+	})
+}
+
+func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	user, err := h.userUC.Login(req.Email, req.Password)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	response := UserResponse{
+		ID:        user.ID,
+		FullName:  user.FullName,
+		Email:     user.Email,
+		Role:      user.Role,
+		Profile:   user.Profile,
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+	}
+
+	respondWithJSON(w, http.StatusOK, SuccessResponse{
+		Message: "Login successful",
+		Data:    response,
+	})
+}
+
+func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract user ID from URL path or query parameter
+	// Example: /users/{id}
+	userID := r.URL.Query().Get("id")
+	if userID == "" {
+		respondWithError(w, http.StatusBadRequest, "User ID is required")
+		return
+	}
+
+	var id int64
+	if _, err := fmt.Sscanf(userID, "%d", &id); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	user, err := h.userUC.GetUserByID(id)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	response := UserResponse{
+		ID:        user.ID,
+		FullName:  user.FullName,
+		Email:     user.Email,
+		Role:      user.Role,
+		Profile:   user.Profile,
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+	}
+
+	respondWithJSON(w, http.StatusOK, SuccessResponse{
+		Message: "User retrieved successfully",
+		Data:    response,
+	})
+}
+
+func (h *UserHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Optional: Add authentication middleware here
+	// Example: Only admins can get all users
+
+	users, err := h.userUC.GetAllUsers()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var response []UserResponse
+	for _, user := range users {
+		response = append(response, UserResponse{
+			ID:        user.ID,
+			FullName:  user.FullName,
+			Email:     user.Email,
+			Role:      user.Role,
+			Profile:   user.Profile,
+			CreatedAt: user.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, SuccessResponse{
+		Message: "Users retrieved successfully",
+		Data:    response,
+	})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(payload)
+}
+
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	respondWithJSON(w, code, ErrorResponse{Error: message})
+}
+
+
+============================================================
+FILE: delivery/http/user_routes.go
+============================================================
+package routes
+
+import (
+	"black_project/delivery/http/handler"
+	"encoding/json"
+	"net/http"
+)
+
+func SetupUserRoutes(userHandler *handler.UserHandler) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// Use Go 1.22+ pattern matching
+	mux.HandleFunc("POST /register", userHandler.Register)
+	mux.HandleFunc("POST /login", userHandler.Login)
+	mux.HandleFunc("GET /users", userHandler.GetAllUsers)
+
+	// Health check
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	})
+
+	return mux
+}}
+
+
+============================================================
+FILE: domain/user.go
+============================================================
+package domain
+
+import (
+	"time"
+)
+
+type Role string
+
+const (
+	RoleAdmin  Role = "admin"
+	RoleWorker Role = "worker"
+	RoleClient Role = "client"
+)
+
+func (r Role) IsValid() bool {
+	switch r {
+	case RoleAdmin, RoleWorker, RoleClient:
+		return true
+	default:
+		return false
+	}
+}
+
+type Profile struct {
+	FirstName string    `json:"first_name,omitempty"`
+	LastName  string    `json:"last_name,omitempty"`
+	BirthDate time.Time `json:"birth_date,omitempty"`
+	Address   string    `json:"address,omitempty"`
+}
+
+type User struct {
+	ID        int64     `json:"id"`
+	FullName  string    `json:"full_name"`
+	Email     string    `json:"email"`
+	Password  string    `json:"password"`
+	CreatedAt time.Time `json:"created_at"`
+
+	Role    Role    `json:"role"`
+	Profile Profile `json:"profile,omitempty"`
+}
+
+
+============================================================
+FILE: repository/postgres.go
+============================================================
+package repository
+
+import (
+	"black_project/domain"
+	"database/sql"
+	"fmt"
+	"time"
+)
+
+type postgresRepository struct {
+	db *sql.DB
+}
+
+func NewPostgresRepository(db *sql.DB) UserRepository {
+	return &postgresRepository{db: db}
+}
+
+func (r *postgresRepository) GetByEmail(email string) (*domain.User, error) {
+	query := `
+		SELECT 
+			u.id, u.full_name, u.email, u.password, u.created_at,
+			p.first_name, p.last_name, p.birth_date, p.address,
+			r.role
+		FROM users u
+		LEFT JOIN profiles p ON u.id = p.user_id
+		LEFT JOIN roles r ON u.id = r.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`
+
+	user, err := r.scanUser(query, email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user with email %s not found", email)
+		}
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (r *postgresRepository) GetByID(id int64) (*domain.User, error) {
+	query := `
+		SELECT 
+			u.id, u.full_name, u.email, u.password, u.created_at,
+			p.first_name, p.last_name, p.birth_date, p.address,
+			r.role
+		FROM users u
+		LEFT JOIN profiles p ON u.id = p.user_id
+		LEFT JOIN roles r ON u.id = r.user_id
+		WHERE u.id = $1
+		LIMIT 1
+	`
+
+	user, err := r.scanUser(query, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user with ID %d not found", id)
+		}
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (r *postgresRepository) Create(user *domain.User) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if user.CreatedAt.IsZero() {
+		user.CreatedAt = time.Now()
+	}
+
+	userQuery := `
+		INSERT INTO users (full_name, email, password, created_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`
+
+	err = tx.QueryRow(
+		userQuery,
+		user.FullName,
+		user.Email,
+		user.Password,
+		user.CreatedAt,
+	).Scan(&user.ID)
+
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	profileQuery := `
+		INSERT INTO profiles (user_id, first_name, last_name, birth_date, address)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (user_id) DO UPDATE SET
+			first_name = EXCLUDED.first_name,
+			last_name = EXCLUDED.last_name,
+			birth_date = EXCLUDED.birth_date,
+			address = EXCLUDED.address,
+			updated_at = CURRENT_TIMESTAMP
+	`
+
+	_, err = tx.Exec(
+		profileQuery,
+		user.ID,
+		user.Profile.FirstName,
+		user.Profile.LastName,
+		user.Profile.BirthDate,
+		user.Profile.Address,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create profile: %w", err)
+	}
+
+	roleQuery := `
+		INSERT INTO roles (user_id, role)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, role) DO NOTHING
+	`
+
+	_, err = tx.Exec(roleQuery, user.ID, string(user.Role))
+	if err != nil {
+		return fmt.Errorf("failed to assign role: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (r *postgresRepository) GetAll() ([]*domain.User, error) {
+	query := `
+		SELECT 
+			u.id, u.full_name, u.email, u.password, u.created_at,
+			p.first_name, p.last_name, p.birth_date, p.address,
+			r.role
+		FROM users u
+		LEFT JOIN profiles p ON u.id = p.user_id
+		LEFT JOIN roles r ON u.id = r.user_id
+		ORDER BY u.created_at DESC
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*domain.User
+	for rows.Next() {
+		user, err := r.scanUserFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return users, nil
+}
+
+func (r *postgresRepository) GetUserWithProfile(userID int64) (*domain.User, error) {
+	return r.GetByID(userID)
+}
+
+func (r *postgresRepository) EmailExists(email string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`
+	var exists bool
+	
+	err := r.db.QueryRow(query, email).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check email existence: %w", err)
+	}
+	
+	return exists, nil
+}
+
+func (r *postgresRepository) scanUser(query string, args ...interface{}) (*domain.User, error) {
+	var user domain.User
+	var firstName, lastName, address sql.NullString
+	var birthDate sql.NullTime
+	var role sql.NullString
+
+	err := r.db.QueryRow(query, args...).Scan(
+		&user.ID,
+		&user.FullName,
+		&user.Email,
+		&user.Password,
+		&user.CreatedAt,
+		&firstName,
+		&lastName,
+		&birthDate,
+		&address,
+		&role,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	user.Profile = domain.Profile{
+		FirstName: firstName.String,
+		LastName:  lastName.String,
+		Address:   address.String,
+	}
+
+	if birthDate.Valid {
+		user.Profile.BirthDate = birthDate.Time
+	}
+
+	if role.Valid {
+		user.Role = domain.Role(role.String)
+	}
+
+	return &user, nil
+}
+
+func (r *postgresRepository) scanUserFromRows(rows *sql.Rows) (*domain.User, error) {
+	var user domain.User
+	var firstName, lastName, address sql.NullString
+	var birthDate sql.NullTime
+	var role sql.NullString
+
+	err := rows.Scan(
+		&user.ID,
+		&user.FullName,
+		&user.Email,
+		&user.Password,
+		&user.CreatedAt,
+		&firstName,
+		&lastName,
+		&birthDate,
+		&address,
+		&role,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	user.Profile = domain.Profile{
+		FirstName: firstName.String,
+		LastName:  lastName.String,
+		Address:   address.String,
+	}
+
+	if birthDate.Valid {
+		user.Profile.BirthDate = birthDate.Time
+	}
+
+	if role.Valid {
+		user.Role = domain.Role(role.String)
+	}
+
+	return &user, nil
+}
+
+
+============================================================
+FILE: repository/user_repository.go
+============================================================
+package repository
+
+import "black_project/domain"
+
+type UserRepository interface {
+	GetByEmail(email string) (*domain.User, error)
+	GetByID(id int64) (*domain.User, error)
+	Create(user *domain.User) error
+	GetAll() ([]*domain.User, error)
+	GetUserWithProfile(userID int64) (*domain.User, error)
+	EmailExists(email string) (bool, error)
+}
+
+
+============================================================
+FILE: usecase/user_usecase.go
+============================================================
+package usecase
+
+import (
+	"black_project/domain"
+	"black_project/repository"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/argon2"
+)
+
+type UserUseCase interface {
+	Register(email, password, fullName string, role domain.Role, profile domain.Profile) (*domain.User, error)
+	Login(email, password string) (*domain.User, error)
+	GetUserByID(id int64) (*domain.User, error)
+	GetAllUsers() ([]*domain.User, error)
+	ValidateUserCredentials(email, password string) (*domain.User, error)
+}
+
+type userUseCase struct {
+	userRepo repository.UserRepository
+}
+
+func NewUserUseCase(userRepo repository.UserRepository) UserUseCase {
+	return &userUseCase{
+		userRepo: userRepo,
+	}
+}
+
+type argon2Params struct {
+	memory      uint32
+	iterations  uint32
+	parallelism uint8
+	saltLength  uint32
+	keyLength   uint32
+}
+
+var argon2Config = &argon2Params{
+	memory:      64 * 1024, // 64 MB
+	iterations:  3,
+	parallelism: 2,
+	saltLength:  16,
+	keyLength:   32,
+}
+
+func (uc *userUseCase) Register(email, password, fullName string, role domain.Role, profile domain.Profile) (*domain.User, error) {
+	// 1. Validate inputs
+	if strings.TrimSpace(email) == "" {
+		return nil, errors.New("email is required")
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, errors.New("password is required")
+	}
+	if strings.TrimSpace(fullName) == "" {
+		return nil, errors.New("full name is required")
+	}
+	if !role.IsValid() {
+		return nil, errors.New("invalid role")
+	}
+	if len(password) < 8 {
+		return nil, errors.New("password must be at least 8 characters")
+	}
+
+	// 2. Check if email already exists
+	exists, err := uc.userRepo.EmailExists(email)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check email: %w", err)
+	}
+	if exists {
+		return nil, errors.New("email already registered")
+	}
+
+	// 3. Hash password with Argon2
+	hashedPassword, err := uc.hashPassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	// 4. Create user domain object
+	user := &domain.User{
+		FullName:  strings.TrimSpace(fullName),
+		Email:     strings.ToLower(strings.TrimSpace(email)),
+		Password:  hashedPassword,
+		Role:      role,
+		Profile:   profile,
+		CreatedAt: time.Now(),
+	}
+
+	// 5. Save to repository
+	err = uc.userRepo.Create(user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	// 6. Clear sensitive data before returning
+	user.Password = ""
+	return user, nil
+}
+
+func (uc *userUseCase) Login(email, password string) (*domain.User, error) {
+	// 1. Validate inputs
+	if strings.TrimSpace(email) == "" || strings.TrimSpace(password) == "" {
+		return nil, errors.New("email and password are required")
+	}
+
+	// 2. Get user from repository
+	user, err := uc.userRepo.GetByEmail(strings.ToLower(strings.TrimSpace(email)))
+	if err != nil {
+		// Security: Return generic error to avoid user enumeration
+		return nil, errors.New("invalid credentials")
+	}
+
+	// 3. Verify password with Argon2
+	valid, err := uc.verifyPassword(password, user.Password)
+	if err != nil {
+		return nil, fmt.Errorf("password verification failed: %w", err)
+	}
+	if !valid {
+		return nil, errors.New("invalid credentials")
+	}
+
+	// 5. Clear sensitive data before returning
+	user.Password = ""
+	return user, nil
+}
+
+func (uc *userUseCase) ValidateUserCredentials(email, password string) (*domain.User, error) {
+	return uc.Login(email, password)
+}
+
+func (uc *userUseCase) GetUserByID(id int64) (*domain.User, error) {
+	if id <= 0 {
+		return nil, errors.New("invalid user ID")
+	}
+
+	user, err := uc.userRepo.GetByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Clear sensitive data
+	user.Password = ""
+	return user, nil
+}
+
+func (uc *userUseCase) GetAllUsers() ([]*domain.User, error) {
+	users, err := uc.userRepo.GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get users: %w", err)
+	}
+
+	// Clear sensitive data from all users
+	for _, user := range users {
+		user.Password = ""
+	}
+
+	return users, nil
+}
+
+func (uc *userUseCase) hashPassword(password string) (string, error) {
+	// Generate random salt
+	salt := make([]byte, argon2Config.saltLength)
+	_, err := rand.Read(salt)
+	if err != nil {
+		return "", err
+	}
+
+	// Hash password with Argon2
+	hash := argon2.IDKey(
+		[]byte(password),
+		salt,
+		argon2Config.iterations,
+		argon2Config.memory,
+		argon2Config.parallelism,
+		argon2Config.keyLength,
+	)
+
+	// Encode salt and hash to base64
+	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
+	b64Hash := base64.RawStdEncoding.EncodeToString(hash)
+
+	// Format: $argon2id$v=19$m=65536,t=3,p=2$salt$hash
+	encodedHash := fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
+		argon2Config.memory,
+		argon2Config.iterations,
+		argon2Config.parallelism,
+		b64Salt,
+		b64Hash,
+	)
+
+	return encodedHash, nil
+}
+
+func (uc *userUseCase) verifyPassword(password, encodedHash string) (bool, error) {
+	// Parse encoded hash
+	parts := strings.Split(encodedHash, "$")
+	if len(parts) != 6 {
+		return false, errors.New("invalid hash format")
+	}
+
+	// Extract parameters
+	var memory, iterations uint32
+	var parallelism uint8
+	_, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism)
+	if err != nil {
+		return false, err
+	}
+
+	// Decode salt and hash
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return false, err
+	}
+
+	expectedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil {
+		return false, err
+	}
+
+	// Compute hash with provided password
+	actualHash := argon2.IDKey(
+		[]byte(password),
+		salt,
+		iterations,
+		memory,
+		parallelism,
+		uint32(len(expectedHash)),
+	)
+
+	// Constant time comparison to prevent timing attacks
+	return subtle.ConstantTimeCompare(actualHash, expectedHash) == 1, nil
+}
+
+
+============================================================
+FILE: main.go
+============================================================
+package main
+
+import (
+    "black_project/config"
+    "black_project/delivery/http/handler"
+    "black_project/delivery/http/routes"
+    "black_project/repository"
+    "black_project/usecase"
+    "log"
+    "net/http"
+)
+
+func main() {
+    // Database connection
+    db, err := config.ConnectDB()
+    if err != nil {
+        log.Fatal("Failed to connect to database:", err)
+    }
+    defer db.Close()
+
+    // Initialize Clean Architecture layers
+    userRepo := repository.NewPostgresRepository(db)
+    userUC := usecase.NewUserUseCase(userRepo)
+    userHandler := handler.NewUserHandler(userUC)
+    
+    // Setup routes
+    router := routes.SetupUserRoutes(userHandler)
+
+    // Start server
+    port := "8080"
+    log.Printf("Server starting on :%s", port)
+    log.Fatal(http.ListenAndServe(":"+port, router))
+}
