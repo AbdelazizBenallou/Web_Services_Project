@@ -73,9 +73,12 @@ func main() {
 	// -------------------------
 	// Application
 	// -------------------------
+	publisher := messaging.NewRabbitPublisher(ch)
+
 	orderRepo := repository.NewPostgresRepository(db)
-	orderUC := usecase.NewOrderUseCase(orderRepo)
+	orderUC := usecase.NewOrderUseCase(orderRepo, userViewRepo, publisher, )
 	orderHandler := handler.NewOrderHandler(orderUC)
+
 
 	router := routes.SetupOrderRoutes(orderHandler)
 

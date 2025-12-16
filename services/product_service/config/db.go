@@ -1,9 +1,10 @@
-spackage config
+package config
 
 import (
 	"database/sql"
 	"fmt"
 	"os"
+
 	_ "github.com/lib/pq"
 )
 
@@ -23,8 +24,7 @@ func ConnectDB() (*sql.DB, error) {
 		return nil, err
 	}
 
-	// Verify connection
-	if err := db.Ping(); err != nil {
+	if err = db.Ping(); err != nil {
 		return nil, err
 	}
 

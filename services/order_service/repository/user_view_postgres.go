@@ -19,4 +19,12 @@ func (r *UserViewPostgres) Insert(userID int64) error {
 	)
 	return err
 }
+func (r *UserViewPostgres) Exists(userID int64) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM user_view WHERE user_id = $1)`,
+		userID,
+	).Scan(&exists)
 
+	return exists, err
+}

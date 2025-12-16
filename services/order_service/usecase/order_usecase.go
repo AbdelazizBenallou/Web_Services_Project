@@ -4,6 +4,8 @@ import (
 	"errors"
 	"order_service/domain"
 	"order_service/repository"
+	"time"
+	"encoding/json"
 )
 
 type OrderUseCase interface {
@@ -12,10 +14,19 @@ type OrderUseCase interface {
 
 type orderUseCase struct {
 	orderRepo repository.OrderRepository
+	userViewRepo repository.UserViewRepository
+	publisher    EventPublisher
 }
 
-func NewOrderUseCase(orderRepo repository.OrderRepository) OrderUseCase {
-	return &orderUseCase{orderRepo: orderRepo}
+func NewOrderUseCase(orderRepo repository.OrderRepository,
+		     userViewRepo repository.UserViewRepository,
+	             publisher EventPublisher,
+		) OrderUseCase {
+			return &orderUseCase{
+			orderRepo:    orderRepo,
+			userViewRepo: userViewRepo,
+			publisher:    publisher,
+	}
 }
 
 func (uc *orderUseCase) CreateOrder(
@@ -26,20 +37,44 @@ func (uc *orderUseCase) CreateOrder(
 	if userID <= 0 {
 		return nil, errors.New("invalid user id")
 	}
+
+	exists, err := uc.userViewRepo.Exists(userID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, errors.New("user not registered in order service")
+	}
+
 	if len(items) == 0 {
 		return nil, errors.New("order must have items")
 	}
 
 	order := &domain.Order{
-		UserID: userID,
-		Items:  items,
+		UserID:    userID,
+		Status:    domain.StatusPendingInventory,
+		Items:     items,
+		CreatedAt: time.Now(),
 	}
 
-	err := uc.orderRepo.Create(order)
-	if err != nil {
+	if err := uc.orderRepo.Create(order); err != nil {
 		return nil, err
+	}
+
+	if uc.publisher != nil {
+		event := map[string]interface{}{
+			"order_id":   order.ID,
+			"user_id":    order.UserID,
+			"status":     order.Status,
+			"items":      order.Items,
+			"created_at": order.CreatedAt,
+		}
+
+		data, _ := json.Marshal(event)
+		_ = uc.publisher.Publish("order.created", data)
 	}
 
 	return order, nil
 }
+
 
