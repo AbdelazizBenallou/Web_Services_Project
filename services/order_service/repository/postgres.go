@@ -66,11 +66,15 @@ func (r *postgresRepository) GetByID(id int64) (*domain.Order, error) {
 	return &o, nil
 }
 
-func (r *postgresRepository) UpdateStatus(id int64, status domain.OrderStatus) error {
+
+func (r *postgresRepository) UpdateStatus(
+	orderID int64,
+	status domain.OrderStatus,
+) error {
 	_, err := r.db.Exec(
-		`UPDATE orders SET status=$1 WHERE id=$2`,
+		`UPDATE orders SET status = $1 WHERE id = $2`,
 		status,
-		id,
+		orderID,
 	)
 	return err
 }

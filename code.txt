@@ -3,9 +3,9 @@ This digest is designed to be easily parsed by Large Language Models.
 
 --- SUMMARY ---
 Repository: black_project
-Files Analyzed: 20
-Total Text Size: 45.55 KB
-Estimated Tokens (text only): ~12,900
+Files Analyzed: 22
+Total Text Size: 48.37 KB
+Estimated Tokens (text only): ~13,754
 
 --- DIRECTORY STRUCTURE ---
 black_project/
@@ -22,9 +22,12 @@ black_project/
     │   ├── domain/
     │   │   ├── order_item.go
     │   │   └── order.go
+    │   ├── messaging/
+    │   │   └── user_registered_consumer.go
     │   ├── repository/
     │   │   ├── order_repository.go
-    │   │   └── postgres.go
+    │   │   ├── postgres.go
+    │   │   └── ser_view_postgres.go
     │   ├── usecase/
     │   │   └── order_usecase.go
     │   └── main.go
@@ -192,6 +195,86 @@ type Order struct {
 
 
 ============================================================
+FILE: services/order_service/messaging/user_registered_consumer.go
+============================================================
+package messaging
+
+import (
+	"encoding/json"
+	"log"
+
+	"github.com/streadway/amqp"
+	"order_service/repository"
+)
+
+type UserRegisteredEvent struct {
+	UserID int64 `json:"user_id"`
+}
+
+func ConsumeUserRegistered(
+	ch *amqp.Channel,
+	userViewRepo *repository.UserViewPostgres,
+) error {
+
+	q, err := ch.QueueDeclare(
+		"user_registered_queue",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	err = ch.QueueBind(
+		q.Name,
+		"user.registered",
+		"events",
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	msgs, err := ch.Consume(
+		q.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for msg := range msgs {
+			var event UserRegisteredEvent
+			if err := json.Unmarshal(msg.Body, &event); err != nil {
+				log.Println("invalid user.registered event:", err)
+				continue
+			}
+
+			if err := userViewRepo.Insert(event.UserID); err != nil {
+				log.Println("failed to insert into user_view:", err)
+				continue
+			}
+
+			log.Println("user_view inserted for user_id:", event.UserID)
+		}
+	}()
+
+	return nil
+}
+
+
+
+============================================================
 FILE: services/order_service/repository/order_repository.go
 ============================================================
 package repository
@@ -289,6 +372,33 @@ func (r *postgresRepository) UpdateStatus(id int64, status domain.OrderStatus) e
 
 
 ============================================================
+FILE: services/order_service/repository/ser_view_postgres.go
+============================================================
+package repository
+
+import "database/sql"
+
+type UserViewPostgres struct {
+	db *sql.DB
+}
+
+func NewUserViewPostgres(db *sql.DB) *UserViewPostgres {
+	return &UserViewPostgres{db: db}
+}
+
+func (r *UserViewPostgres) Insert(userID int64) error {
+	_, err := r.db.Exec(
+		`INSERT INTO user_view (user_id)
+		 VALUES ($1)
+		 ON CONFLICT (user_id) DO NOTHING`,
+		userID,
+	)
+	return err
+}
+
+
+
+============================================================
 FILE: services/order_service/usecase/order_usecase.go
 ============================================================
 package usecase
@@ -346,20 +456,76 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
+	"strings"
+
 	"order_service/config"
 	"order_service/delivery/http/handler"
 	"order_service/delivery/http/routes"
+	"order_service/messaging"
 	"order_service/repository"
 	"order_service/usecase"
+
+	"github.com/streadway/amqp"
 )
 
 func main() {
+	// -------------------------
+	// Database
+	// -------------------------
 	db, err := config.ConnectDB()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
+	// -------------------------
+	// RabbitMQ
+	// -------------------------
+	rabbitURL := os.Getenv("RABBITMQ_URL")
+	if rabbitURL == "" {
+		log.Fatal("RABBITMQ_URL is not set")
+	}
+	if !strings.HasPrefix(rabbitURL, "amqp://") && !strings.HasPrefix(rabbitURL, "amqps://") {
+		log.Fatal("invalid RABBITMQ_URL: " + rabbitURL)
+	}
+
+	conn, err := amqp.Dial(rabbitURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
+		"events",
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// -------------------------
+	// Rabbit Consumer
+	// -------------------------
+	userViewRepo := repository.NewUserViewPostgres(db)
+	if err := messaging.ConsumeUserRegistered(ch, userViewRepo); err != nil {
+		log.Fatal(err)
+	}
+
+	// -------------------------
+	// Application
+	// -------------------------
 	orderRepo := repository.NewPostgresRepository(db)
 	orderUC := usecase.NewOrderUseCase(orderRepo)
 	orderHandler := handler.NewOrderHandler(orderUC)
@@ -825,9 +991,8 @@ func (r *postgresRepository) Create(user *domain.User) error {
 			first_name = EXCLUDED.first_name,
 			last_name = EXCLUDED.last_name,
 			birth_date = EXCLUDED.birth_date,
-			address = EXCLUDED.address,
-			updated_at = CURRENT_TIMESTAMP
-	`
+			address = EXCLUDED.address
+		`
 
 	_, err = tx.Exec(
 		profileQuery,
@@ -2193,31 +2358,55 @@ FILE: services/user_service/main.go
 package main
 
 import (
-    "user_service/config"
-    "user_service/delivery/http/handler"
-    "user_service/delivery/http/routes"
-    "user_service/repository"
-    "user_service/usecase"
-    "github.com/streadway/amqp"
-    "user_service/messaging"
-    "log"
-    "net/http"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+
+	"user_service/config"
+	"user_service/delivery/http/handler"
+	"user_service/delivery/http/routes"
+	"user_service/messaging"
+	"user_service/repository"
+	"user_service/usecase"
+
+	"github.com/streadway/amqp"
 )
 
 func main() {
-    // Database connection
-    db, err := config.ConnectDB()
-    if err != nil {
-        log.Fatal("Failed to connect to database:", err)
-    }
-    defer db.Close()
+	// -------------------------
+	// Database
+	// -------------------------
+	db, err := config.ConnectDB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
-    // Initialize Clean Architecture layers
-    userRepo := repository.NewPostgresRepository(db)
-   
-    conn, _ := amqp.Dial("amqp://guest:guest@rabbitmq:5672/")
-    ch, _ := conn.Channel()
-    ch.ExchangeDeclare(
+	// -------------------------
+	// RabbitMQ
+	// -------------------------
+	rabbitURL := os.Getenv("RABBITMQ_URL")
+	if rabbitURL == "" {
+		log.Fatal("RABBITMQ_URL is not set")
+	}
+	if !strings.HasPrefix(rabbitURL, "amqp://") && !strings.HasPrefix(rabbitURL, "amqps://") {
+		log.Fatal("invalid RABBITMQ_URL: " + rabbitURL)
+	}
+
+	conn, err := amqp.Dial(rabbitURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ch.Close()
+
+	err = ch.ExchangeDeclare(
 		"events",
 		"topic",
 		true,
@@ -2226,18 +2415,21 @@ func main() {
 		false,
 		nil,
 	)
-    
-    publisher := messaging.NewRabbitPublisher(ch)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-    userUC := usecase.NewUserUseCase(userRepo, publisher)
-   
-    userHandler := handler.NewUserHandler(userUC)
-    
-    // Setup routes
-    router := routes.SetupUserRoutes(userHandler)
+	publisher := messaging.NewRabbitPublisher(ch)
 
-    // Start server
-    port := "8080"
-    log.Printf("Server starting on :%s", port)
-    log.Fatal(http.ListenAndServe(":"+port, router))
+	// -------------------------
+	// Application
+	// -------------------------
+	userRepo := repository.NewPostgresRepository(db)
+	userUC := usecase.NewUserUseCase(userRepo, publisher)
+	userHandler := handler.NewUserHandler(userUC)
+
+	router := routes.SetupUserRoutes(userHandler)
+
+	log.Println("User Service running on :8080")
+	log.Fatal(http.ListenAndServe(":8080", router))
 }

@@ -39,3 +39,21 @@ func (uc *stockUseCase) GetByProductID(productID int64) (*domain.Stock, error) {
 	return uc.repo.GetByProductID(productID)
 }
 
+func (uc *stockUseCase) ReserveForOrder(items []domain.OrderItem) error {
+	for _, item := range items {
+		stock, err := uc.repo.GetByProductID(item.ProductID)
+		if err != nil {
+			return err
+		}
+
+		if err := stock.Reserve(item.Quantity); err != nil {
+			return err
+		}
+
+		if err := uc.repo.Update(stock); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+

@@ -69,6 +69,30 @@ services:
       - backend
 
   # =========================
+  # PRODUCT SERVICE DATABASE
+  # =========================
+  product_postgres:
+    image: postgres:17
+    container_name: product_service_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: product_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5434:5432"
+    volumes:
+      - product_postgres_data:/var/lib/postgresql/data
+      - ./services/product_service/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  # =========================
   # USER SERVICE API
   # =========================
   user_service:
@@ -122,12 +146,42 @@ services:
     networks:
       - backend
 
+
+  # =========================
+  # PRODUCT SERVICE API
+  # =========================
+  product_service:
+    build: ./services/product_service
+    container_name: product_service_web
+    restart: unless-stopped
+    depends_on:
+      product_postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: product_postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: password123
+      DB_NAME: product_service
+      DB_SSLMODE: disable
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./services/product_service:/app
+    networks:
+      - backend
+
+
 # =========================
 # VOLUMES
 # =========================
 volumes:
   user_postgres_data:
   order_postgres_data:
+  product_postgres_data:
 
 # =========================
 # NETWORK

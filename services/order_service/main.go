@@ -69,7 +69,16 @@ func main() {
 	if err := messaging.ConsumeUserRegistered(ch, userViewRepo); err != nil {
 		log.Fatal(err)
 	}
+// -------------------------
+// Inventory Consumers
+// -------------------------
+	if err := messaging.ConsumeInventoryReserved(ch, orderRepo); err != nil {
+		log.Fatal(err)
+	}
 
+	if err := messaging.ConsumeInventoryFailed(ch, orderRepo); err != nil {
+		log.Fatal(err)
+	}
 	// -------------------------
 	// Application
 	// -------------------------

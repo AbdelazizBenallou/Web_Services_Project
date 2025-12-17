@@ -48,3 +48,24 @@ func (r *stockPostgres) Update(stock *domain.Stock) error {
 	return err
 }
 
+func (r *stockPostgres) Reserve(productID int64, qty int) (bool, error) {
+	res, err := r.db.Exec(
+		`UPDATE stock
+		 SET quantity = quantity - $1
+		 WHERE product_id = $2
+		   AND quantity >= $1`,
+		qty,
+		productID,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows == 1, nil
+}
+
