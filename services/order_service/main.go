@@ -63,32 +63,48 @@ func main() {
 	}
 
 	// -------------------------
-	// Rabbit Consumer
+	// Repositories
 	// -------------------------
+	orderRepo := repository.NewPostgresRepository(db)
 	userViewRepo := repository.NewUserViewPostgres(db)
+
+	// -------------------------
+	// Publisher
+	// -------------------------
+	publisher := messaging.NewRabbitPublisher(ch)
+
+	// -------------------------
+	// UseCases
+	// -------------------------
+	orderUC := usecase.NewOrderUseCase(
+		orderRepo,
+		userViewRepo,
+		publisher,
+	)
+
+	// -------------------------
+	// Rabbit Consumers
+	// -------------------------
+
+	// user.registered → insert into user_view
 	if err := messaging.ConsumeUserRegistered(ch, userViewRepo); err != nil {
 		log.Fatal(err)
 	}
-// -------------------------
-// Inventory Consumers
-// -------------------------
+
+	// inventory.reserved → CONFIRMED
 	if err := messaging.ConsumeInventoryReserved(ch, orderRepo); err != nil {
 		log.Fatal(err)
 	}
 
+	// inventory.failed → CANCELLED
 	if err := messaging.ConsumeInventoryFailed(ch, orderRepo); err != nil {
 		log.Fatal(err)
 	}
-	// -------------------------
-	// Application
-	// -------------------------
-	publisher := messaging.NewRabbitPublisher(ch)
 
-	orderRepo := repository.NewPostgresRepository(db)
-	orderUC := usecase.NewOrderUseCase(orderRepo, userViewRepo, publisher, )
+	// -------------------------
+	// HTTP
+	// -------------------------
 	orderHandler := handler.NewOrderHandler(orderUC)
-
-
 	router := routes.SetupOrderRoutes(orderHandler)
 
 	log.Println("Order Service running on :8081")
