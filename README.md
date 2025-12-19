@@ -1,122 +1,185 @@
-This README explains **architecture, services, messaging, APIs, environment variables, and how to run everything step-by-step** based strictly on your codebase .
+---
+
+# Black Project – Go Microservices E-Commerce Backend
+
+A **Go-based microservices backend** implementing an event-driven e-commerce system using **Clean Architecture**, **PostgreSQL**, **RabbitMQ**, and **Docker Compose**.
+
+This project demonstrates **service decoupling**, **asynchronous messaging**, and **domain-driven design principles**.
 
 ---
 
-# Black Project – Microservices E-Commerce Backend
+## 📌 High-Level Overview
 
-A **Go-based microservices backend** implementing a simple e-commerce workflow using **Clean Architecture**, **PostgreSQL**, and **RabbitMQ** for **event-driven communication**.
-
----
-
-## 📌 Architecture Overview
-
-This project is composed of **three independent microservices**:
+The system is composed of **three independent microservices**:
 
 | Service             | Responsibility                           | Port   |
 | ------------------- | ---------------------------------------- | ------ |
 | **User Service**    | User registration, authentication, roles | `8080` |
-| **Order Service**   | Order creation & lifecycle               | `8081` |
+| **Order Service**   | Order creation & lifecycle management    | `8081` |
 | **Product Service** | Products, categories & inventory         | `8082` |
 
-### Communication
+### Communication Patterns
 
-* **HTTP REST** for synchronous operations
-* **RabbitMQ (Topic Exchange)** for async event handling
-
-### Key Events
-
-* `user.registered`
-* `order.created`
-* `inventory.reserved`
-* `inventory.failed`
+* **HTTP REST APIs** for synchronous operations
+* **RabbitMQ (topic exchange)** for asynchronous event communication
 
 ---
 
-## 🧱 Project Structure
-
-```
-black_project/
-├── services/
-│   ├── user_service/
-│   ├── order_service/
-│   └── product_service/
-└── .gitignore
-```
+## 🧱 Architecture
 
 Each service follows **Clean Architecture**:
 
 ```
 service/
-├── config/        # DB config
+├── config/        # Database configuration
 ├── delivery/      # HTTP handlers & routes
 ├── domain/        # Entities & business rules
-├── repository/    # Database layer
+├── repository/    # Persistence layer
 ├── usecase/       # Application logic
-├── messaging/     # RabbitMQ producers/consumers
+├── messaging/     # RabbitMQ producers & consumers
 └── main.go        # Service entrypoint
 ```
 
+### Key Design Principles
+
+* Dependency inversion
+* Explicit domain rules
+* Event-driven communication
+* No shared databases between services
+
 ---
 
-## 🔁 Event Flow (End-to-End)
+## 🔁 Event Flow
 
-1. **User registers**
+### 1️⃣ User Registration
 
-   * User Service publishes `user.registered`
-   * Order Service stores user in `user_view`
+* User registers via **User Service**
+* `user.registered` event is published
+* Order Service consumes the event and stores a read-only user view
 
-2. **Order is created**
+### 2️⃣ Order Creation
 
-   * Order Service publishes `order.created`
+* Order Service validates user existence
+* Order is created with status `PENDING_INVENTORY`
+* `order.created` event is published
 
-3. **Inventory reservation**
+### 3️⃣ Inventory Reservation
 
-   * Product Service consumes `order.created`
-   * If stock OK → publishes `inventory.reserved`
-   * If stock fails → publishes `inventory.failed`
+* Product Service consumes `order.created`
+* Attempts to reserve stock
 
-4. **Order final state**
+  * Success → publishes `inventory.reserved`
+  * Failure → publishes `inventory.failed`
 
-   * Order Service updates order to:
+### 4️⃣ Order Finalization
 
-     * `CONFIRMED` or
-     * `CANCELLED`
+* Order Service updates order status:
+
+  * `CONFIRMED` on success
+  * `CANCELLED` on failure
 
 ---
 
 ## 🛠 Tech Stack
 
-* **Language**: Go 1.22+
+* **Language**: Go (1.22+)
 * **Database**: PostgreSQL
 * **Message Broker**: RabbitMQ
-* **Architecture**: Clean Architecture
+* **Containerization**: Docker & Docker Compose
 * **Security**:
 
-  * Argon2 password hashing
+  * Argon2id password hashing
   * Constant-time password comparison
 
 ---
 
-## ⚙️ Environment Variables
+## ▶️ How to Run (Docker Compose)
 
-All services require the following:
+### ✅ Prerequisites
+
+* Docker (v20+)
+* Docker Compose (v2+)
+
+Verify installation:
+
+```bash
+docker --version
+docker compose version
+```
+
+---
+
+### 🚀 Start the Application
+
+From the **project root** (where `docker-compose.yml` is located):
+
+```bash
+docker compose up --build
+```
+
+This command will:
+
+* Build all Go services
+* Start PostgreSQL
+* Start RabbitMQ
+* Start all microservices
+* Create a shared Docker network
+
+---
+
+### 🧯 Stop the Application
+
+```bash
+docker compose down
+```
+
+Remove volumes (database reset):
+
+```bash
+docker compose down -v
+```
+
+---
+
+## 🌐 Exposed Ports
+
+| Service         | Port    |
+| --------------- | ------- |
+| User Service    | `8080`  |
+| Order Service   | `8081`  |
+| Product Service | `8082`  |
+| RabbitMQ UI     | `15672` |
+| PostgreSQL      | `5432`  |
+
+RabbitMQ Management UI:
+👉 [http://localhost:15672](http://localhost:15672)
+**Username:** `guest`
+**Password:** `guest`
+
+---
+
+## 🔧 Environment Configuration
+
+All environment variables are defined inside `docker-compose.yml`.
+
+Each service uses:
 
 ```env
-DB_HOST=localhost
+DB_HOST=postgres
 DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=postgres
 DB_NAME=black_project
 DB_SSLMODE=disable
 
-RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
 ```
 
-> Each service may use **its own database schema**.
+> ⚠️ `postgres` and `rabbitmq` are **Docker service names**, not `localhost`.
 
 ---
 
-## 🗄 Database Tables (Required)
+## 🗄 Database Tables
 
 ### User Service
 
@@ -136,61 +199,7 @@ RABBITMQ_URL=amqp://guest:guest@localhost:5672/
 * `products`
 * `stock`
 
-> Tables must exist before running services.
-
----
-
-## ▶️ How to Run the Project
-
-### 1️⃣ Start Dependencies
-
-#### PostgreSQL
-
-```bash
-docker run -d \
-  --name postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 \
-  postgres
-```
-
-#### RabbitMQ
-
-```bash
-docker run -d \
-  --name rabbitmq \
-  -p 5672:5672 \
-  -p 15672:15672 \
-  rabbitmq:3-management
-```
-
-RabbitMQ UI → [http://localhost:15672](http://localhost:15672)
-User: `guest` | Password: `guest`
-
----
-
-### 2️⃣ Run Services (in separate terminals)
-
-#### User Service
-
-```bash
-cd services/user_service
-go run main.go
-```
-
-#### Order Service
-
-```bash
-cd services/order_service
-go run main.go
-```
-
-#### Product Service
-
-```bash
-cd services/product_service
-go run main.go
-```
+> Tables must be created via migrations or init scripts before production use.
 
 ---
 
@@ -198,13 +207,13 @@ go run main.go
 
 ### 🧑 User Service (`:8080`)
 
-| Method | Endpoint      | Description   |
-| ------ | ------------- | ------------- |
-| POST   | `/register`   | Register user |
-| POST   | `/login`      | Login         |
-| GET    | `/users/{id}` | Get user      |
-| GET    | `/users`      | List users    |
-| GET    | `/health`     | Health check  |
+| Method | Endpoint      | Description     |
+| ------ | ------------- | --------------- |
+| POST   | `/register`   | Register a user |
+| POST   | `/login`      | User login      |
+| GET    | `/users/{id}` | Get user by ID  |
+| GET    | `/users`      | List all users  |
+| GET    | `/health`     | Health check    |
 
 ---
 
@@ -226,13 +235,17 @@ go run main.go
 | ------ | --------- | ------------ |
 | POST   | `/orders` | Create order |
 
-Example payload:
+**Example Request**
 
 ```json
 {
   "user_id": 1,
   "items": [
-    { "product_id": 1, "quantity": 2, "price": 100 }
+    {
+      "product_id": 1,
+      "quantity": 2,
+      "price": 100
+    }
   ]
 }
 ```
@@ -241,21 +254,32 @@ Example payload:
 
 ## 🔐 Security Notes
 
-* Passwords hashed with **Argon2id**
-* No plaintext passwords stored
+* Passwords are hashed using **Argon2id**
+* No plaintext passwords are stored or returned
 * Constant-time comparison prevents timing attacks
-* Sensitive fields removed from responses
+* Sensitive fields removed from API responses
+
+---
+
+## 🧪 Useful Docker Commands
+
+```bash
+docker compose ps
+docker compose logs -f
+docker compose restart order_service
+```
 
 ---
 
 ## 🚀 Future Improvements
 
-* JWT authentication
+* JWT authentication & authorization
 * API Gateway
-* Docker Compose
-* Observability (Prometheus + Grafana)
+* Database migrations
+* Observability (Prometheus, Grafana)
 * Distributed tracing
 * Saga pattern enhancements
+* Kubernetes deployment
 
 ---
 
@@ -265,11 +289,3 @@ MIT License
 
 ---
 
-If you want, I can also:
-
-* ✅ Create **Docker Compose**
-* ✅ Add **Swagger/OpenAPI**
-* ✅ Write **SQL migrations**
-* ✅ Convert this into **monorepo CI/CD**
-
-Just tell me 👍
